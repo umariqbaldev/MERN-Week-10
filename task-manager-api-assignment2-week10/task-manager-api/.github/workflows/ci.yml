@@ -1,0 +1,85 @@
+# X1: CI workflow — runs tests and publishes coverage as an artifact / badge.
+name: CI — Tests & Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: task_manager_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: task_manager_test
+      JWT_SECRET: ci-jwt-secret
+      JWT_EXPIRES_IN: 15m
+      REFRESH_EXPIRES_IN: 7d
+      ARGON2_TIME_COST: 1
+      ARGON2_MEMORY_COST: 1024
+      THROTTLE_TTL: 1000
+      THROTTLE_LIMIT: 10000
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run tests with coverage
+        run: npx jest --coverage --forceExit --detectOpenHandles
+
+      - name: Upload coverage report as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Coverage summary badge
+        if: always()
+        run: |
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f coverage/coverage-summary.json ]; then
+            STMTS=$(node -e "const s=require('./coverage/coverage-summary.json');console.log(s.total.statements.pct)")
+            BRANCH=$(node -e "const s=require('./coverage/coverage-summary.json');console.log(s.total.branches.pct)")
+            FUNCS=$(node -e "const s=require('./coverage/coverage-summary.json');console.log(s.total.functions.pct)")
+            LINES=$(node -e "const s=require('./coverage/coverage-summary.json');console.log(s.total.lines.pct)")
+            echo "| Metric     | Coverage |" >> $GITHUB_STEP_SUMMARY
+            echo "|------------|----------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Statements | ${STMTS}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Branches   | ${BRANCH}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Functions  | ${FUNCS}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Lines      | ${LINES}% |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Coverage summary not found." >> $GITHUB_STEP_SUMMARY
+          fi
